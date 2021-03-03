@@ -104,6 +104,39 @@ def condition_ent_plus(condition, z):
     return HZYX
 
 
+def condition_ent_plus_multiprocess(condition, z, pool, num_cores):
+    """
+    多个条件的条件熵
+    :param condition:里面都是一个个特征
+    :param z:
+    :return:
+    """
+    HZYX = 0.0
+    # 这三行只占用很少一部分时间
+    condition_value = [np.unique(condition[i]) for i in range(len(condition))]  # 求出了每个子数组有哪些元素
+    intersection = np.array(np.meshgrid(*condition_value)).T.reshape(-1, len(condition_value))
+    number = pow(len(condition[0]), len(condition))  # 概率的分母    联合分布有多少个值
+
+    results = []
+    sp = int(intersection.shape[0] / num_cores)
+    for i in range(num_cores):
+        d = intersection[i * sp:(i + 1) * sp]
+        tttt = [number, d, condition, z, ]
+        result = pool.map_async(condition_ent_thread, (tttt,))
+        results.append(result)
+    # print('apply_async: 不堵塞')
+
+    for i in results:
+        i.wait()  # 等待进程函数执行完毕
+
+    HZYX = 0.0
+    for i in results:
+        if i.ready():  # 进程函数是否已经启动了
+            if i.successful():  # 进程函数是否执行成功
+                HZYX += np.array(i.get())
+    return HZYX
+
+
 def joint_entropy(x, y):
     """
     联合熵等于熵加条件熵
@@ -159,6 +192,17 @@ def condition_MI(x, y, z):
     return HXZ + HYZ - HZ - HXYZ
 
 
+def joint_MI_three(x, y, z):
+    HXYZ = joint_entropy_three(x, y, z)
+    HX = entropy(x)
+    HY = entropy(y)
+    HZ = entropy(z)
+    IXY = metrics.mutual_info_score(x, y)
+    IYZ = metrics.mutual_info_score(y, z)
+    IXZ = metrics.mutual_info_score(x, z)
+    return HXYZ - HX - HY - HZ + IXY + IYZ + IXZ
+
+
 def MI_chain(fi, F, S):
     """
     互信息的链式法则
@@ -181,9 +225,3 @@ def MI_chain(fi, F, S):
         c = np.row_stack((a, fi))  # 把待选特征加到条件里面
         H2 = H2 + condition_ent_plus(c, F[:, S[i]])
     return H1 - H2
-
-
-if __name__ == '__main__':
-    x = np.ones(5, dtype=int)
-    y = np.ones(5, dtype=int)
-    z = np.ones(5, dtype=int)
